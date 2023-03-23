@@ -1,7 +1,9 @@
 package com.wugui.datatx.core.handler;
 
+import cn.hutool.core.lang.Pair;
 import com.wugui.datatx.core.biz.model.ReturnT;
 import com.wugui.datatx.core.biz.model.TriggerParam;
+import org.apache.commons.exec.DefaultExecutor;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -21,7 +23,7 @@ public abstract class IJobHandler {
 	/** fail timeout */
 	public static final ReturnT<String> FAIL_TIMEOUT = new ReturnT<>(502, null);
 
-	public static final ConcurrentMap<String, String> jobTmpFiles = new ConcurrentHashMap<>();
+	public static final ConcurrentMap<String, Pair<String, DefaultExecutor>> jobTmpFiles = new ConcurrentHashMap<>();
 	/**
 	 * execute handler, invoked when executor receives a scheduling request
 	 *

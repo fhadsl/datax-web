@@ -1,6 +1,8 @@
 package com.wugui.datax.executor.service.jobhandler;
 
 import cn.hutool.core.io.FileUtil;
+import cn.hutool.core.lang.Pair;
+import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.IdUtil;
 import com.wugui.datatx.core.biz.model.HandleProcessCallbackParam;
 import com.wugui.datatx.core.biz.model.ReturnT;
@@ -9,15 +11,19 @@ import com.wugui.datatx.core.handler.IJobHandler;
 import com.wugui.datatx.core.handler.annotation.JobHandler;
 import com.wugui.datatx.core.log.JobLogger;
 import com.wugui.datatx.core.thread.ProcessCallbackThread;
-import com.wugui.datatx.core.util.ProcessUtil;
 import com.wugui.datax.executor.service.logparse.LogStatistics;
 import com.wugui.datax.executor.util.SystemUtils;
+import org.apache.commons.exec.CommandLine;
+import org.apache.commons.exec.DefaultExecutor;
+import org.apache.commons.exec.ExecuteWatchdog;
+import org.apache.commons.exec.PumpStreamHandler;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
-import java.util.concurrent.FutureTask;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 import static com.wugui.datax.executor.service.command.BuildCommand.buildDataXExecutorCmd;
 import static com.wugui.datax.executor.service.jobhandler.DataXConstant.DEFAULT_JSON;
@@ -39,52 +45,41 @@ public class ExecutorJobHandler extends IJobHandler {
     @Value("${datax.pypath}")
     private String dataXPyPath;
 
+    private static final long TIME_OUT = 1000 * 60 * 15;
+
 
     @Override
     public ReturnT<String> execute(TriggerParam trigger) {
 
         int exitValue = -1;
-        Thread errThread = null;
         String tmpFilePath;
         LogStatistics logStatistics = null;
         //Generate JSON temporary file
         tmpFilePath = generateTemJsonFile(trigger.getJobJson());
 
         try {
-            String[] cmdarrayFinal = buildDataXExecutorCmd(trigger, tmpFilePath,dataXPyPath);
-            final Process process = Runtime.getRuntime().exec(cmdarrayFinal);
-            String prcsId = ProcessUtil.getProcessId(process);
-            JobLogger.log("------------------DataX process id: " + prcsId);
-            jobTmpFiles.put(prcsId, tmpFilePath);
+            String id = UUID.fastUUID().toString(true);
             //update datax process id
-            HandleProcessCallbackParam prcs = new HandleProcessCallbackParam(trigger.getLogId(), trigger.getLogDateTime(), prcsId);
+            HandleProcessCallbackParam prcs = new HandleProcessCallbackParam(trigger.getLogId(), trigger.getLogDateTime(), id);
             ProcessCallbackThread.pushCallBack(prcs);
-            // log-thread
-            Thread futureThread = null;
-            FutureTask<LogStatistics> futureTask = new FutureTask<>(() -> analysisStatisticsLog(new BufferedInputStream(process.getInputStream())));
-            futureThread = new Thread(futureTask);
-            futureThread.start();
 
-            errThread = new Thread(() -> {
-                try {
-                    analysisStatisticsLog(new BufferedInputStream(process.getErrorStream()));
-                } catch (IOException e) {
-                    JobLogger.log(e);
-                }
-            });
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            ByteArrayOutputStream errorStream = new ByteArrayOutputStream();
 
-            logStatistics = futureTask.get();
-            errThread.start();
-            // process-wait
-            exitValue = process.waitFor();      // exit code: 0=success, 1=error
-            // log-thread join
-            errThread.join();
+            String[] cmdarrayFinal = buildDataXExecutorCmd(trigger, tmpFilePath, dataXPyPath);
+            String cmd = Arrays.stream(cmdarrayFinal).collect(Collectors.joining(" "));
+            CommandLine commandline = CommandLine.parse(cmd);
+            DefaultExecutor executor = this.initExecutor(outputStream, errorStream, TIME_OUT);
+
+            JobLogger.log("------------------DataX process id: " + id);
+            jobTmpFiles.put(id, new Pair<>(tmpFilePath, executor));
+            //调用命令行
+            exitValue = executor.execute(commandline);
+            logStatistics = analysisStatisticsLog(this.parse(outputStream));
+            analysisStatisticsLog(this.parse(errorStream));
         } catch (Exception e) {
             JobLogger.log(e);
         } finally {
-            if (errThread != null && errThread.isAlive()) {
-                errThread.interrupt();
-            }
             //  删除临时文件
             if (FileUtil.exist(tmpFilePath)) {
                 FileUtil.del(new File(tmpFilePath));
@@ -96,7 +91,6 @@ public class ExecutorJobHandler extends IJobHandler {
             return new ReturnT<>(IJobHandler.FAIL.getCode(), "command exit value(" + exitValue + ") is failed");
         }
     }
-
 
 
     private String generateTemJsonFile(String jobJson) {
@@ -116,6 +110,25 @@ public class ExecutorJobHandler extends IJobHandler {
             JobLogger.log("JSON 临时文件写入异常：" + e.getMessage());
         }
         return tmpFilePath;
+    }
+
+    private ByteArrayInputStream parse(OutputStream out) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        baos = (ByteArrayOutputStream) out;
+        ByteArrayInputStream swapStream = new ByteArrayInputStream(baos.toByteArray());
+        return swapStream;
+    }
+
+    private DefaultExecutor initExecutor(OutputStream out, OutputStream err, Long timeOut) {
+        //看门狗，可设置超时
+        ExecuteWatchdog watchdog = new ExecuteWatchdog(TIME_OUT);
+        DefaultExecutor exec = new DefaultExecutor();
+        exec.setExitValues(null);
+        PumpStreamHandler streamHandler = new PumpStreamHandler(out, err);
+        exec.setStreamHandler(streamHandler);
+        exec.setWatchdog(watchdog);
+        exec.setExitValues(null);
+        return exec;
     }
 
 }

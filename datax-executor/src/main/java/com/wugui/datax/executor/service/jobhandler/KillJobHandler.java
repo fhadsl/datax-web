@@ -2,13 +2,16 @@ package com.wugui.datax.executor.service.jobhandler;
 
 
 import cn.hutool.core.io.FileUtil;
+import cn.hutool.core.lang.Pair;
+import cn.hutool.core.util.ObjectUtil;
 import com.wugui.datatx.core.biz.model.ReturnT;
 import com.wugui.datatx.core.biz.model.TriggerParam;
 import com.wugui.datatx.core.handler.IJobHandler;
 import com.wugui.datatx.core.handler.annotation.JobHandler;
-import com.wugui.datatx.core.util.ProcessUtil;
+import com.wugui.datatx.core.log.JobLogger;
+import org.apache.commons.exec.DefaultExecutor;
+import org.apache.commons.exec.ExecuteWatchdog;
 import org.springframework.stereotype.Component;
-import org.springframework.util.CollectionUtils;
 
 import java.io.File;
 
@@ -25,15 +28,25 @@ public class KillJobHandler extends IJobHandler {
     @Override
     public ReturnT<String> execute(TriggerParam tgParam) {
         String processId = tgParam.getProcessId();
-        boolean result = ProcessUtil.killProcessByPid(processId);
-        //  删除临时文件
-        if (!CollectionUtils.isEmpty(jobTmpFiles)) {
-            String pathname = jobTmpFiles.get(processId);
-            if (pathname != null) {
+        JobLogger.log("------------------prepare to Kill DataX process id: " + processId);
+        JobLogger.log("------------------jobTmpFiles size: " + jobTmpFiles.size());
+        if (jobTmpFiles.containsKey(processId)) {
+            Pair<String, DefaultExecutor> pair = jobTmpFiles.get(processId);
+            if(ObjectUtil.isNotNull(pair)){
+                //删除文件
+                String pathname = pair.getKey();
+                if (pathname != null) {
                 FileUtil.del(new File(pathname));
-                jobTmpFiles.remove(processId);
+                }
+                boolean result = false;
+                if(ObjectUtil.isNotNull(pair.getValue())){
+                    ExecuteWatchdog executeWatchdog = pair.getValue().getWatchdog();
+                    executeWatchdog.destroyProcess();
+                }
+                jobTmpFiles.remove(pathname);
+                return result ? IJobHandler.SUCCESS : IJobHandler.FAIL;
             }
         }
-        return result ? IJobHandler.SUCCESS : IJobHandler.FAIL;
+        return IJobHandler.SUCCESS;
     }
 }
