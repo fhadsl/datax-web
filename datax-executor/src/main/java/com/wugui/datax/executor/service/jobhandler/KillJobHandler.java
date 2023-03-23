@@ -12,6 +12,7 @@ import com.wugui.datatx.core.log.JobLogger;
 import org.apache.commons.exec.DefaultExecutor;
 import org.apache.commons.exec.ExecuteWatchdog;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.io.File;
 
@@ -38,13 +39,12 @@ public class KillJobHandler extends IJobHandler {
                 if (pathname != null) {
                 FileUtil.del(new File(pathname));
                 }
-                boolean result = false;
                 if(ObjectUtil.isNotNull(pair.getValue())){
                     ExecuteWatchdog executeWatchdog = pair.getValue().getWatchdog();
                     executeWatchdog.destroyProcess();
                 }
                 jobTmpFiles.remove(pathname);
-                return result ? IJobHandler.SUCCESS : IJobHandler.FAIL;
+                return IJobHandler.SUCCESS;
             }
         }
         return IJobHandler.SUCCESS;
