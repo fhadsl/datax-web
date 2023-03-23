@@ -32,6 +32,7 @@ public class KillJobHandler extends IJobHandler {
         JobLogger.log("------------------prepare to Kill DataX process id: " + processId);
         JobLogger.log("------------------jobTmpFiles size: " + jobTmpFiles.size());
         if (jobTmpFiles.containsKey(processId)) {
+            JobLogger.log("------------------get entry from jobTmpFiles :" + jobTmpFiles.size());
             Pair<String, DefaultExecutor> pair = jobTmpFiles.get(processId);
             if(ObjectUtil.isNotNull(pair)){
                 //删除文件
